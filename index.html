@@ -3305,6 +3305,9 @@ function saveProjectsObj(obj){
 }
 function getActiveProjectId(){return localStorage.getItem('pg_activeProject')||null;}
 function setActiveProjectId(id){try{localStorage.setItem('pg_activeProject',id);}catch(e){}}
+// "Espace invité" (déconnecté) — totalement séparé de l'espace du compte connecté
+function getGuestProjectId(){return localStorage.getItem('pg_guestProject')||null;}
+function setGuestProjectId(id){try{localStorage.setItem('pg_guestProject',id);}catch(e){}}
 
 function serializeState(){
   return {cfg,pageMode,pageConfigs,pageLigneCfgs,pages};
@@ -3377,7 +3380,10 @@ function renderProjectsList(){
   if(!wrap)return;
   const projects=getProjects();
   const activeId=getActiveProjectId();
-  const ids=Object.keys(projects).sort((a,b)=>(projects[b].updatedAt||0)-(projects[a].updatedAt||0));
+  const prefix=fbUser?('cl_'+fbUser.uid+'_'):null;
+  const ids=Object.keys(projects)
+    .filter(id=>prefix?id.startsWith(prefix):!id.startsWith('cl_'))
+    .sort((a,b)=>(projects[b].updatedAt||0)-(projects[a].updatedAt||0));
   wrap.innerHTML='';
   if(!ids.length){
     wrap.innerHTML='<div style="font-size:11px;color:var(--sub);margin-bottom:8px;">Aucun projet encore.</div>';
@@ -3404,11 +3410,12 @@ function renderProjectsList(){
 function createNewProject(){
   const name=prompt('Nom du nouveau projet :','Projet '+(Object.keys(getProjects()).length+1));
   if(!name||!name.trim())return;
-  const id='pj_'+Date.now();
+  const id=fbUser?('cl_'+fbUser.uid+'_'+Date.now()):('pj_guest_'+Date.now());
   const projects=getProjects();
   projects[id]={name:name.trim(),data:{cfg:{pageW:210,pageH:297,bgColor:'#ffffff',emptyBg:'#ebebeb',borderColor:'#ffffff',borderSize:0,shadow:'none',quality:0.82},pageMode:[],pageConfigs:[],pageLigneCfgs:[],pages:[[]]},updatedAt:Date.now()};
   saveProjectsObj(projects);
   setActiveProjectId(id);
+  if(!fbUser)setGuestProjectId(id);
   // démarre ce nouveau projet avec une première page 100ar par défaut
   pageMode=['grille'];
   const d=PAGE_DEFAULTS[0];
@@ -3426,6 +3433,7 @@ function openProject(id){
   const projects=getProjects();
   if(!projects[id])return;
   setActiveProjectId(id);
+  if(!fbUser)setGuestProjectId(id);
   loadState(projects[id].data);
   document.getElementById('modal-projects').style.display='none';
   toast('Projet ouvert : '+projects[id].name);
@@ -3537,21 +3545,47 @@ function fbErrorFr(err){
 
 if(fbAuth){
   fbAuth.onAuthStateChanged(user=>{
+    const wasLoggedIn=!!fbUser;
     fbUser=user;
     const btn=document.getElementById('tbtn-acc');
     if(btn)btn.classList.toggle('on',!!user);
-    if(user){
-      // Connecté : on charge les projets du cloud (et on les fusionne dans la liste locale pour les voir dans "Projets")
-      syncCloudProjectsToLocal();
+    if(user&&!wasLoggedIn){
+      // On vient de se CONNECTER : on met de côté l'espace invité, et on bascule sur l'espace du compte (cloud)
+      if(getActiveProjectId())setGuestProjectId(getActiveProjectId());
+      syncCloudProjectsToLocal().then(()=>{
+        const projects=getProjects();
+        const cloudIds=Object.keys(projects).filter(id=>id.startsWith('cl_'+fbUser.uid+'_'));
+        let pick=cloudIds.sort((a,b)=>(projects[b].updatedAt||0)-(projects[a].updatedAt||0))[0];
+        if(!pick){
+          pick='cl_'+fbUser.uid+'_'+Date.now();
+          projects[pick]={name:'Mon premier projet',data:{cfg:{pageW:210,pageH:297,bgColor:'#ffffff',emptyBg:'#ebebeb',borderColor:'#ffffff',borderSize:0,shadow:'none',quality:0.82},pageMode:[],pageConfigs:[],pageLigneCfgs:[],pages:[[]]},updatedAt:Date.now()};
+          saveProjectsObj(projects);
+        }
+        setActiveProjectId(pick);
+        loadState(projects[pick].data);
+        toast('Connecté — voici vos projets en ligne.');
+      });
+    } else if(!user&&wasLoggedIn){
+      // On vient de se DÉCONNECTER : retour à l'espace invité, le compte n'est plus touché par les modifications
+      let gid=getGuestProjectId();
+      const projects=getProjects();
+      if(!gid||!projects[gid]){
+        gid='pj_guest_'+Date.now();
+        projects[gid]={name:'Projet (hors compte)',data:{cfg:{pageW:210,pageH:297,bgColor:'#ffffff',emptyBg:'#ebebeb',borderColor:'#ffffff',borderSize:0,shadow:'none',quality:0.82},pageMode:[],pageConfigs:[],pageLigneCfgs:[],pages:[[]]},updatedAt:Date.now()};
+        saveProjectsObj(projects);
+        setGuestProjectId(gid);
+      }
+      setActiveProjectId(gid);
+      loadState(projects[gid].data);
     }
   });
 }
 function syncCloudProjectsToLocal(){
-  if(!fbUser||!fbDb)return;
-  fbDb.collection('users').doc(fbUser.uid).collection('projects').get().then(snap=>{
+  if(!fbUser||!fbDb)return Promise.resolve();
+  return fbDb.collection('users').doc(fbUser.uid).collection('projects').get().then(snap=>{
     const projects=getProjects();
     snap.forEach(doc=>{
-      projects[doc.id]=doc.data();
+      projects['cl_'+fbUser.uid+'_'+doc.id]=doc.data();
     });
     saveProjectsObj(projects);
   }).catch(()=>{});
@@ -3559,15 +3593,19 @@ function syncCloudProjectsToLocal(){
 // Sauvegarde un projet dans le cloud (en plus du local) — silencieux, sans bloquer si hors-ligne
 function cloudSaveProject(id,projectObj){
   if(!fbUser||!fbDb)return;
-  fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(id).set(projectObj).catch(err=>{
+  if(!id.startsWith('cl_'+fbUser.uid+'_'))return; // ne jamais envoyer un projet "invité" vers le compte
+  const cloudId=id.slice(('cl_'+fbUser.uid+'_').length);
+  fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(cloudId).set(projectObj).catch(err=>{
     // Probablement trop volumineux (limite 1 Mo/document) → on sauvegarde la structure seule dans le cloud
     const light={name:projectObj.name,data:serializeStructureOnly(),updatedAt:projectObj.updatedAt};
-    fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(id).set(light).catch(()=>{});
+    fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(cloudId).set(light).catch(()=>{});
   });
 }
 function cloudDeleteProject(id){
   if(!fbUser||!fbDb)return;
-  fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(id).delete().catch(()=>{});
+  if(!id.startsWith('cl_'+fbUser.uid+'_'))return;
+  const cloudId=id.slice(('cl_'+fbUser.uid+'_').length);
+  fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(cloudId).delete().catch(()=>{});
 }
 renderPriceLabels();
 renderAddLigneCustomButtons();
