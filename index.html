@@ -12,6 +12,9 @@
 <meta name="theme-color" content="#0F6E56">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="icon" href="icon-192.png">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
 
@@ -147,12 +150,12 @@ body.dark .tb-w{background:rgba(255,255,255,0.15);color:white;border:1px solid r
 }
 .tb-r:hover{background:#c0392b;}
 .tb-o{
-  background:#f39c12;
+  background:#16997E;
   color:white;
   border:1px solid rgba(255,255,255,0.15);
-  box-shadow:0 2px 10px rgba(243,156,18,0.4);
+  box-shadow:0 2px 10px rgba(22,153,126,0.4);
 }
-.tb-o:hover{background:#d68910;box-shadow:0 3px 14px rgba(243,156,18,0.5);}
+.tb-o:hover{background:#127f68;box-shadow:0 3px 14px rgba(22,153,126,0.5);}
 .tb-sel{
   background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.9);
   border:1px solid rgba(255,255,255,0.18);
@@ -166,6 +169,41 @@ body.dark .tb-w{background:rgba(255,255,255,0.15);color:white;border:1px solid r
   background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.9);
   border:1px solid rgba(255,255,255,0.18);
 }
+.tb-view{
+  background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.9);
+  border:1px solid rgba(255,255,255,0.18);
+}
+.tb-view.on{
+  background:#16997E;color:white;
+  border:1px solid rgba(255,255,255,0.3);
+  box-shadow:0 2px 10px rgba(22,153,126,0.5);
+}
+.tb-acc{
+  background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.9);
+  border:1px solid rgba(255,255,255,0.18);
+}
+.tb-acc.on{
+  background:#16997E;color:white;
+  border:1px solid rgba(255,255,255,0.3);
+}
+/* ===== MODE AFFICHAGE : lecture seule, on cache toute édition ===== */
+body.view-mode .topbar .tb:not(.tb-view){display:none!important;}
+body.view-mode .sts{display:none!important;}
+body.view-mode #page-nav{display:none!important;}
+body.view-mode .dropz{display:none!important;}
+body.view-mode #fi,body.view-mode #fi-replace,body.view-mode #fi-page,body.view-mode #fi-bulk{display:none!important;}
+body.view-mode .cbt{display:none!important;}
+body.view-mode .plus-btn{display:none!important;}
+body.view-mode .sel-overlay{display:none!important;}
+body.view-mode #sel-bar{display:none!important;}
+body.view-mode .content{padding-top:6px;}
+#view-exit{
+  position:fixed;top:14px;right:14px;z-index:9998;display:none;
+  background:rgba(18,35,52,0.85);color:white;border:none;border-radius:10px;
+  padding:9px 14px;font-size:13px;font-weight:700;cursor:pointer;
+  box-shadow:0 4px 14px rgba(0,0,0,0.3);
+}
+body.view-mode #view-exit{display:block;}
 .sel-overlay{
   position:absolute;inset:0;z-index:60;cursor:pointer;
   display:flex;align-items:flex-start;justify-content:flex-end;padding:5px;
@@ -765,6 +803,8 @@ body.dark .qual-btn.sel{background:#1D9E75;color:white;border-color:#0F6E56;box-
   <button class="tb tb-w" onclick="showAddPageModal()">＋ Page</button>
   <button class="tb tb-sel" id="tbtn-sel" onclick="toggleSelectMode()" title="Sélectionner plusieurs cadres">☑ Sélection</button>
   <button class="tb tb-proj" onclick="openProjectsModal()" title="Mes projets">📁 Projets</button>
+  <button class="tb tb-view" onclick="toggleViewMode()" title="Mode affichage (lecture seule)">👁 Affichage</button>
+  <button class="tb tb-acc" id="tbtn-acc" onclick="openAccountModal()" title="Mon compte">👤 Compte</button>
   <button class="tb tb-o" onclick="showExportMenu()">⬇ Exporter</button>
 </div>
 
@@ -1060,6 +1100,7 @@ body.dark .qual-btn.sel{background:#1D9E75;color:white;border-color:#0F6E56;box-
 </div>
 
 <button id="scroll-top" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Remonter en haut">↑</button>
+<button id="view-exit" onclick="toggleViewMode()">✕ Quitter l'affichage</button>
 
 <div id="page-nav"></div>
 
@@ -1068,6 +1109,26 @@ body.dark .qual-btn.sel{background:#1D9E75;color:white;border-color:#0F6E56;box-
   <button class="sb-rep" onclick="startBulkReplace()">↔ Remplacer</button>
   <button class="sb-del" onclick="bulkDeleteSelected()">🗑 Supprimer</button>
   <button class="sb-cancel" onclick="clearSelection()">Désélectionner</button>
+</div>
+
+<!-- MODAL COMPTE -->
+<div id="modal-account" style="display:none;position:fixed;inset:0;background:rgba(18,35,52,0.92);backdrop-filter:blur(14px);z-index:10003;align-items:center;justify-content:center;overflow-y:auto;padding:20px 0;">
+  <div class="modal-box" style="max-width:320px;">
+    <h3 id="acc-title">👤 Mon compte</h3>
+    <div id="acc-logged-out">
+      <div style="font-size:11px;color:var(--sub);margin-bottom:10px;">Créez un compte pour retrouver vos projets sur n'importe quel téléphone. Juste un nom et un mot de passe, rien d'autre.</div>
+      <input type="text" id="acc-username" placeholder="Nom d'utilisateur" maxlength="24" style="width:100%;padding:9px 10px;margin-bottom:8px;border:1.5px solid var(--bord);border-radius:8px;font-size:14px;background:var(--surf);color:var(--text);">
+      <input type="password" id="acc-password" placeholder="Mot de passe (6 caractères min.)" style="width:100%;padding:9px 10px;margin-bottom:10px;border:1.5px solid var(--bord);border-radius:8px;font-size:14px;background:var(--surf);color:var(--text);">
+      <div id="acc-msg" style="font-size:12px;color:var(--ruby);margin-bottom:8px;display:none;"></div>
+      <button class="modal-opt" style="border:2px solid var(--green);color:var(--green);" onclick="accSignup()">➕ Créer un compte</button>
+      <button class="modal-opt" style="border:2px solid var(--blue);color:var(--blue);" onclick="accLogin()">🔓 Se connecter</button>
+    </div>
+    <div id="acc-logged-in" style="display:none;">
+      <div style="font-size:13px;color:var(--text);margin-bottom:14px;">Connecté en tant que <b id="acc-current-name"></b></div>
+      <button class="modal-opt" style="border:2px solid var(--ruby);color:var(--ruby);" onclick="accLogout()">🚪 Se déconnecter</button>
+    </div>
+    <button class="modal-cancel" onclick="document.getElementById('modal-account').style.display='none'">Fermer</button>
+  </div>
 </div>
 
 <!-- MODAL PROJETS -->
@@ -1405,6 +1466,7 @@ let popupTarget=null;
 let replaceTarget=null;
 let history=[];
 let selectMode=false;
+let viewMode=false;
 let selectedCells=[]; // [{pi,idx1,idx2}] idx2 = undefined en mode grille
 
 // Page en cours d'édition dans le panel grille/lignes
@@ -2435,8 +2497,8 @@ function makeCell(c,pi,idx1,idx2,cellW,cellH,showBadge){
   }
 
   let lt=0;
-  cell.addEventListener('dblclick',ev=>{if(selectMode)return;ev.stopPropagation();openPopup(pi,idx1,idx2,ev);});
-  cell.addEventListener('touchend',ev=>{if(selectMode)return;const n=Date.now();if(n-lt<350){openPopup(pi,idx1,idx2,ev.changedTouches[0]);}lt=n;});
+  cell.addEventListener('dblclick',ev=>{if(selectMode||viewMode)return;ev.stopPropagation();openPopup(pi,idx1,idx2,ev);});
+  cell.addEventListener('touchend',ev=>{if(selectMode||viewMode)return;const n=Date.now();if(n-lt<350){openPopup(pi,idx1,idx2,ev.changedTouches[0]);}lt=n;});
 
   if(selectMode){
     const on=isCellSelected(pi,idx1,idx2);
@@ -2567,6 +2629,24 @@ function confirmPageSelectModal(){
 // Curseur de placement partagé dans un batch
 let _placeState=null;
 
+// Réduit la taille d'une photo (redimensionne + recompresse) pour qu'elle tienne
+// dans le stockage local ET dans le cloud (Firestore limite à 1 Mo par document).
+function compressDataURL(dataURL,cb,maxDim,quality){
+  maxDim=maxDim||1600;quality=quality||0.78;
+  const img=new Image();
+  img.onload=()=>{
+    let w=img.width,h=img.height;
+    if(w>maxDim||h>maxDim){
+      if(w>h){h=Math.round(h*maxDim/w);w=maxDim;}
+      else{w=Math.round(w*maxDim/h);h=maxDim;}
+    }
+    const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+    cv.getContext('2d').drawImage(img,0,0,w,h);
+    try{cb(cv.toDataURL('image/jpeg',quality));}catch(e){cb(dataURL);}
+  };
+  img.onerror=()=>cb(dataURL);
+  img.src=dataURL;
+}
 function handleFiles(files){
   const tpi=window._tpi,ti1=window._ti1,ti2=window._ti2;
   const mpsPages=window._mpsTargetPages;
@@ -2592,12 +2672,14 @@ function handleFiles(files){
   arr.forEach((file,fi)=>{
     const r=new FileReader();
     r.onload=e=>{
-      srcs[fi]=e.target.result;
-      readCount++;
-      if(readCount===arr.length){
-        srcs.forEach(src=>placeSrc(src));
-        render();
-      }
+      compressDataURL(e.target.result,(small)=>{
+        srcs[fi]=small;
+        readCount++;
+        if(readCount===arr.length){
+          srcs.forEach(src=>placeSrc(src));
+          render();
+        }
+      });
     };
     r.readAsDataURL(file);
   });
@@ -2664,8 +2746,10 @@ function handleReplace(files){
   saveHistory();
   const r=new FileReader();
   r.onload=e=>{
-    const c=pageMode[pi]==='lignes'?pages[pi][idx1][idx2]:pages[pi][idx1];
-    c.src=e.target.result;c.imgX=0;c.imgY=0;c.imgScale=1;c.rotation=0;render();
+    compressDataURL(e.target.result,(small)=>{
+      const c=pageMode[pi]==='lignes'?pages[pi][idx1][idx2]:pages[pi][idx1];
+      c.src=small;c.imgX=0;c.imgY=0;c.imgScale=1;c.rotation=0;render();
+    });
   };
   r.readAsDataURL(f);
   document.getElementById('fi-replace').value='';
@@ -2682,6 +2766,14 @@ function toast(msg){
   t.textContent=msg;t.style.display='block';
   clearTimeout(window._toastTimer);
   window._toastTimer=setTimeout(()=>{t.style.display='none';},3500);
+}
+function toggleViewMode(){
+  viewMode=!viewMode;
+  document.body.classList.toggle('view-mode',viewMode);
+  const btn=document.querySelector('.tb-view');
+  if(btn)btn.classList.toggle('on',viewMode);
+  if(viewMode&&selectMode){selectMode=false;selectedCells=[];const sb=document.getElementById('tbtn-sel');if(sb)sb.classList.remove('on');updateSelectBar();}
+  render();
 }
 function getCellRef(pi,idx1,idx2){
   return pageMode[pi]==='lignes'?pages[pi][idx1][idx2]:pages[pi][idx1];
@@ -2737,10 +2829,12 @@ function handleBulkReplace(files){
     const target=ordered[i];
     const r=new FileReader();
     r.onload=e=>{
-      const c=getCellRef(target.pi,target.idx1,target.idx2);
-      if(c){c.src=e.target.result;c.imgX=0;c.imgY=0;c.imgScale=1;c.rotation=0;}
-      loaded++;
-      if(loaded===n)finishBulk();
+      compressDataURL(e.target.result,(small)=>{
+        const c=getCellRef(target.pi,target.idx1,target.idx2);
+        if(c){c.src=small;c.imgX=0;c.imgY=0;c.imgScale=1;c.rotation=0;}
+        loaded++;
+        if(loaded===n)finishBulk();
+      });
     };
     r.readAsDataURL(f);
   }
@@ -3215,6 +3309,17 @@ function setActiveProjectId(id){try{localStorage.setItem('pg_activeProject',id);
 function serializeState(){
   return {cfg,pageMode,pageConfigs,pageLigneCfgs,pages};
 }
+// Version "structure seule" : garde tout (cadres, marges, mise en page) mais retire les photos (src),
+// qui sont ce qui prend toute la place. Toujours minuscule, donc TOUJOURS sauvegardable.
+function serializeStructureOnly(){
+  const lightPages=pages.map(pg=>{
+    if(Array.isArray(pg)&&pg.length&&Array.isArray(pg[0])){
+      return pg.map(l=>l.map(c=>Object.assign({},c,{src:null})));
+    }
+    return pg.map(c=>Object.assign({},c,{src:null}));
+  });
+  return {cfg,pageMode,pageConfigs,pageLigneCfgs,pages:lightPages};
+}
 function loadState(data){
   cfg=data.cfg||cfg;
   pageMode=data.pageMode||[];
@@ -3236,13 +3341,31 @@ function autosaveActiveProject(){
     const projects=getProjects();
     if(!id||!projects[id]){
       id='pj_'+Date.now();
-      projects[id]={name:'Projet 1',data:serializeState(),updatedAt:Date.now()};
+      projects[id]={name:'Projet 1',data:null,updatedAt:Date.now()};
       setActiveProjectId(id);
-    } else {
-      projects[id].data=serializeState();
-      projects[id].updatedAt=Date.now();
     }
-    saveProjectsObj(projects);
+    // 1) on essaie d'abord de TOUT sauvegarder (cadres + photos)
+    let ok=false;
+    try{
+      const full=JSON.stringify(serializeState());
+      projects[id].data=JSON.parse(full);
+      projects[id].updatedAt=Date.now();
+      localStorage.setItem('pg_projects',JSON.stringify(projects));
+      ok=true;
+    }catch(e){ok=false;}
+    // 2) si ça échoue (mémoire pleine à cause des photos), on sauvegarde QUAND MÊME
+    //    la structure des cadres seule (sans les photos) pour ne JAMAIS la perdre
+    if(!ok){
+      try{
+        projects[id].data=serializeStructureOnly();
+        projects[id].updatedAt=Date.now();
+        localStorage.setItem('pg_projects',JSON.stringify(projects));
+        toast('⚠️ Mémoire pleine : vos cadres/mise en page sont gardés, mais les photos ne pourront pas être retrouvées après fermeture de l\'app. Exportez bientôt votre travail.');
+      }catch(e2){
+        toast('⚠️ Mémoire saturée — impossible de sauvegarder, même la structure. Exportez votre travail maintenant.');
+      }
+    }
+    if(fbUser)cloudSaveProject(id,projects[id]);
   },500);
 }
 function openProjectsModal(){
@@ -3314,6 +3437,7 @@ function renameProject(id){
   if(!name||!name.trim())return;
   projects[id].name=name.trim();
   saveProjectsObj(projects);
+  if(fbUser)cloudSaveProject(id,projects[id]);
   renderProjectsList();
 }
 function deleteProject(id,btnEl){
@@ -3326,13 +3450,125 @@ function deleteProject(id,btnEl){
   const projects=getProjects();
   delete projects[id];
   saveProjectsObj(projects);
+  if(fbUser)cloudDeleteProject(id);
   if(getActiveProjectId()===id){
     setActiveProjectId('');
   }
   renderProjectsList();
 }
 
-// INIT — restaure le dernier projet ouvert (s'il existe), sinon crée la 1ère page 100ar par défaut
+// ===== FIREBASE : compte (nom + mot de passe) + sauvegarde en ligne des projets =====
+const firebaseConfig={
+  apiKey:"AIzaSyA2qkR89Wt535kVFY1tvHdC3pmySzGBFmg",
+  authDomain:"photogrid-d9ad6.firebaseapp.com",
+  projectId:"photogrid-d9ad6",
+  storageBucket:"photogrid-d9ad6.firebasestorage.app",
+  messagingSenderId:"108478762918",
+  appId:"1:108478762918:web:00dd965364ae2de621c967",
+  measurementId:"G-LML6ZEMB49"
+};
+let fbApp=null,fbAuth=null,fbDb=null,fbUser=null;
+try{
+  fbApp=firebase.initializeApp(firebaseConfig);
+  fbAuth=firebase.auth();
+  fbDb=firebase.firestore();
+}catch(e){console.warn('Firebase indisponible',e);}
+
+function usernameToEmail(u){return u.trim().toLowerCase().replace(/[^a-z0-9_.-]/g,'')+'@photogrid.app';}
+
+function openAccountModal(){
+  document.getElementById('acc-msg').style.display='none';
+  document.getElementById('acc-username').value='';
+  document.getElementById('acc-password').value='';
+  if(fbUser){
+    document.getElementById('acc-logged-out').style.display='none';
+    document.getElementById('acc-logged-in').style.display='block';
+    document.getElementById('acc-current-name').textContent=fbUser.displayName||fbUser.email.split('@')[0];
+  } else {
+    document.getElementById('acc-logged-out').style.display='block';
+    document.getElementById('acc-logged-in').style.display='none';
+  }
+  document.getElementById('modal-account').style.display='flex';
+}
+function accMsg(txt){const el=document.getElementById('acc-msg');el.textContent=txt;el.style.display='block';}
+
+function accSignup(){
+  const username=document.getElementById('acc-username').value.trim();
+  const password=document.getElementById('acc-password').value;
+  if(!username||username.length<3){accMsg('Le nom doit faire au moins 3 caractères.');return;}
+  if(!password||password.length<6){accMsg('Le mot de passe doit faire au moins 6 caractères.');return;}
+  if(!fbAuth||!fbDb){accMsg('Connexion au service indisponible. Vérifiez votre connexion internet.');return;}
+  const usernameKey=username.trim().toLowerCase();
+  fbDb.collection('usernames').doc(usernameKey).get().then(doc=>{
+    if(doc.exists){accMsg('Ce nom est déjà utilisé, choisissez-en un autre.');return;}
+    fbAuth.createUserWithEmailAndPassword(usernameToEmail(username),password).then(cred=>{
+      cred.user.updateProfile({displayName:username});
+      return fbDb.collection('usernames').doc(usernameKey).set({uid:cred.user.uid});
+    }).then(()=>{
+      toast('Compte créé — bienvenue '+username+' !');
+      document.getElementById('modal-account').style.display='none';
+    }).catch(err=>accMsg(fbErrorFr(err)));
+  }).catch(err=>accMsg(fbErrorFr(err)));
+}
+function accLogin(){
+  const username=document.getElementById('acc-username').value.trim();
+  const password=document.getElementById('acc-password').value;
+  if(!username||!password){accMsg('Entrez votre nom et votre mot de passe.');return;}
+  if(!fbAuth){accMsg('Connexion au service indisponible.');return;}
+  fbAuth.signInWithEmailAndPassword(usernameToEmail(username),password).then(()=>{
+    toast('Connecté !');
+    document.getElementById('modal-account').style.display='none';
+  }).catch(err=>accMsg(fbErrorFr(err)));
+}
+function accLogout(){
+  if(fbAuth)fbAuth.signOut();
+  document.getElementById('modal-account').style.display='none';
+  toast('Déconnecté — vos projets restent sauvegardés sur ce compte.');
+}
+function fbErrorFr(err){
+  const c=err&&err.code||'';
+  if(c.includes('wrong-password')||c.includes('invalid-credential'))return 'Mot de passe incorrect.';
+  if(c.includes('user-not-found'))return 'Ce nom n\'existe pas — créez un compte.';
+  if(c.includes('email-already-in-use'))return 'Ce nom est déjà utilisé.';
+  if(c.includes('weak-password'))return 'Mot de passe trop faible (6 caractères min.).';
+  if(c.includes('network'))return 'Pas de connexion internet.';
+  return 'Erreur : '+(err&&err.message?err.message:'inconnue');
+}
+
+if(fbAuth){
+  fbAuth.onAuthStateChanged(user=>{
+    fbUser=user;
+    const btn=document.getElementById('tbtn-acc');
+    if(btn)btn.classList.toggle('on',!!user);
+    if(user){
+      // Connecté : on charge les projets du cloud (et on les fusionne dans la liste locale pour les voir dans "Projets")
+      syncCloudProjectsToLocal();
+    }
+  });
+}
+function syncCloudProjectsToLocal(){
+  if(!fbUser||!fbDb)return;
+  fbDb.collection('users').doc(fbUser.uid).collection('projects').get().then(snap=>{
+    const projects=getProjects();
+    snap.forEach(doc=>{
+      projects[doc.id]=doc.data();
+    });
+    saveProjectsObj(projects);
+  }).catch(()=>{});
+}
+// Sauvegarde un projet dans le cloud (en plus du local) — silencieux, sans bloquer si hors-ligne
+function cloudSaveProject(id,projectObj){
+  if(!fbUser||!fbDb)return;
+  fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(id).set(projectObj).catch(err=>{
+    // Probablement trop volumineux (limite 1 Mo/document) → on sauvegarde la structure seule dans le cloud
+    const light={name:projectObj.name,data:serializeStructureOnly(),updatedAt:projectObj.updatedAt};
+    fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(id).set(light).catch(()=>{});
+  });
+}
+function cloudDeleteProject(id){
+  if(!fbUser||!fbDb)return;
+  fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(id).delete().catch(()=>{});
+}
 renderPriceLabels();
 renderAddLigneCustomButtons();
 const _activeId=getActiveProjectId();

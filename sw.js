@@ -1,5 +1,5 @@
 // Service worker minimal — permet à l'app de s'ouvrir hors-ligne après la 1ère visite
-const CACHE_NAME = 'photogrid-cache-v1';
+const CACHE_NAME = 'photogrid-cache-v2';
 const FILES_TO_CACHE = [
   './index.html',
   './manifest.json',
