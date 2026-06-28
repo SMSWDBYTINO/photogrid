@@ -1112,6 +1112,16 @@ body.dark .qual-btn.sel{background:#1D9E75;color:white;border-color:#0F6E56;box-
 </div>
 
 <!-- MODAL COMPTE -->
+<!-- MODAL CHOIX DE DÉPART : hors-ligne ou en ligne -->
+<div id="modal-mode-choice" style="display:none;position:fixed;inset:0;background:rgba(18,35,52,0.95);backdrop-filter:blur(14px);z-index:10004;align-items:center;justify-content:center;overflow-y:auto;padding:20px 0;">
+  <div class="modal-box" style="max-width:320px;">
+    <h3>Comment voulez-vous commencer ?</h3>
+    <div style="font-size:11px;color:var(--sub);margin:-6px 0 14px;">Vous pourrez changer d'avis plus tard avec le bouton "Compte".</div>
+    <button class="modal-opt" onclick="chooseMode('offline')" style="border:2px solid var(--blue);">📴 Continuer hors-ligne<br><span style="font-size:11px;font-weight:400;color:var(--sub);">Tout reste sur ce téléphone seulement — pas de compte nécessaire</span></button>
+    <button class="modal-opt" onclick="chooseMode('online')" style="border:2px solid var(--green);">☁️ Se connecter / Créer un compte<br><span style="font-size:11px;font-weight:400;color:var(--sub);">Vos projets vous suivent sur tous vos téléphones</span></button>
+  </div>
+</div>
+
 <div id="modal-account" style="display:none;position:fixed;inset:0;background:rgba(18,35,52,0.92);backdrop-filter:blur(14px);z-index:10003;align-items:center;justify-content:center;overflow-y:auto;padding:20px 0;">
   <div class="modal-box" style="max-width:320px;">
     <h3 id="acc-title">👤 Mon compte</h3>
@@ -1137,6 +1147,7 @@ body.dark .qual-btn.sel{background:#1D9E75;color:white;border-color:#0F6E56;box-
     <h3>📁 Mes projets</h3>
     <div style="font-size:11px;color:var(--sub);margin:-6px 0 10px;">Tout se sauvegarde automatiquement sur ce téléphone, même hors-ligne — comme une sauvegarde de jeu.</div>
     <div id="projects-rows"></div>
+    <button class="modal-opt" onclick="manualSave()" style="border:2px solid var(--blue);color:var(--blue);margin-top:6px;">💾 Sauvegarder maintenant</button>
     <button class="modal-opt" onclick="createNewProject()" style="border:2px solid var(--green);color:var(--green);margin-top:6px;">➕ Nouveau projet</button>
     <button class="modal-cancel" onclick="document.getElementById('modal-projects').style.display='none'">Fermer</button>
   </div>
@@ -3368,12 +3379,15 @@ function autosaveActiveProject(){
         toast('⚠️ Mémoire saturée — impossible de sauvegarder, même la structure. Exportez votre travail maintenant.');
       }
     }
-    if(fbUser)cloudSaveProject(id,projects[id]);
+    if(fbUser&&id.startsWith('cl_'+fbUser.uid+'_'))cloudSaveProject(id,projects[id]);
   },500);
 }
 function openProjectsModal(){
   renderProjectsList();
   document.getElementById('modal-projects').style.display='flex';
+  if(fbUser){
+    syncCloudProjectsToLocal().then(()=>renderProjectsList());
+  }
 }
 function renderProjectsList(){
   const wrap=document.getElementById('projects-rows');
@@ -3434,9 +3448,28 @@ function openProject(id){
   if(!projects[id])return;
   setActiveProjectId(id);
   if(!fbUser)setGuestProjectId(id);
-  loadState(projects[id].data);
   document.getElementById('modal-projects').style.display='none';
-  toast('Projet ouvert : '+projects[id].name);
+  if(fbUser&&id.startsWith('cl_'+fbUser.uid+'_')){
+    toast('Chargement du projet…');
+    const cloudId=id.slice(('cl_'+fbUser.uid+'_').length);
+    fetchCloudProjectFull(cloudId).then(full=>{
+      if(full){
+        projects[id]=full;
+        saveProjectsObj(projects);
+        loadState(full.data);
+        toast('Projet ouvert : '+full.name);
+      } else {
+        loadState(projects[id].data);
+        toast('Projet ouvert (depuis la copie locale).');
+      }
+    }).catch(()=>{
+      loadState(projects[id].data);
+      toast('Hors-ligne — copie locale ouverte.');
+    });
+  } else {
+    loadState(projects[id].data);
+    toast('Projet ouvert : '+projects[id].name);
+  }
 }
 function renameProject(id){
   const projects=getProjects();
@@ -3562,8 +3595,16 @@ if(fbAuth){
           saveProjectsObj(projects);
         }
         setActiveProjectId(pick);
-        loadState(projects[pick].data);
-        toast('Connecté — voici vos projets en ligne.');
+        if(pick.startsWith('cl_'+fbUser.uid+'_')&&projects[pick]._cloudId!==undefined){
+          fetchCloudProjectFull(projects[pick]._cloudId||pick.slice(('cl_'+fbUser.uid+'_').length)).then(full=>{
+            if(full){projects[pick]=full;saveProjectsObj(projects);loadState(full.data);}
+            else loadState(projects[pick].data);
+            toast('Connecté — voici vos projets en ligne.');
+          }).catch(()=>{loadState(projects[pick].data);toast('Connecté (hors-ligne pour l\'instant).');});
+        } else {
+          loadState(projects[pick].data);
+          toast('Connecté — voici vos projets en ligne.');
+        }
       });
     } else if(!user&&wasLoggedIn){
       // On vient de se DÉCONNECTER : retour à l'espace invité, le compte n'est plus touché par les modifications
@@ -3581,31 +3622,122 @@ if(fbAuth){
   });
 }
 function syncCloudProjectsToLocal(){
+  // Liste légère des projets du compte (juste les noms/dates, sans les photos — rapide)
   if(!fbUser||!fbDb)return Promise.resolve();
   return fbDb.collection('users').doc(fbUser.uid).collection('projects').get().then(snap=>{
     const projects=getProjects();
     snap.forEach(doc=>{
-      projects['cl_'+fbUser.uid+'_'+doc.id]=doc.data();
+      const meta=doc.data();
+      const localId='cl_'+fbUser.uid+'_'+doc.id;
+      // On garde les données déjà en cache local (pages/photos) si on les a, sinon vide en attendant l'ouverture
+      const existingData=projects[localId]&&projects[localId].data?projects[localId].data:{cfg:meta.cfg,pageMode:meta.pageMode,pageConfigs:meta.pageConfigs,pageLigneCfgs:meta.pageLigneCfgs,pages:[[]]};
+      projects[localId]={name:meta.name,updatedAt:meta.updatedAt,data:existingData,_cloudId:doc.id};
     });
     saveProjectsObj(projects);
   }).catch(()=>{});
 }
-// Sauvegarde un projet dans le cloud (en plus du local) — silencieux, sans bloquer si hors-ligne
-function cloudSaveProject(id,projectObj){
-  if(!fbUser||!fbDb)return;
-  if(!id.startsWith('cl_'+fbUser.uid+'_'))return; // ne jamais envoyer un projet "invité" vers le compte
+// Construit l'identifiant stable d'un cadre (pour le stocker comme document séparé)
+function cellDocId(pageIdx,idx1,idx2){return pageIdx+'_'+idx1+'_'+(idx2===undefined||idx2===null?'x':idx2);}
+// Sauvegarde un projet dans le cloud : 1 document léger pour la mise en page + 1 document PAR CADRE
+// (chaque photo est petite individuellement, donc jamais bloquée par la limite de 1 Mo/document de Firestore)
+function cloudSaveProject(id,projectObj,onDone){
+  if(!fbUser||!fbDb){if(onDone)onDone(false);return;}
+  if(!id.startsWith('cl_'+fbUser.uid+'_')){if(onDone)onDone(false);return;}
   const cloudId=id.slice(('cl_'+fbUser.uid+'_').length);
-  fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(cloudId).set(projectObj).catch(err=>{
-    // Probablement trop volumineux (limite 1 Mo/document) → on sauvegarde la structure seule dans le cloud
-    const light={name:projectObj.name,data:serializeStructureOnly(),updatedAt:projectObj.updatedAt};
-    fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(cloudId).set(light).catch(()=>{});
+  const projRef=fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(cloudId);
+  const data=projectObj.data;
+  const meta={name:projectObj.name,updatedAt:Date.now(),cfg:data.cfg,pageMode:data.pageMode,pageConfigs:data.pageConfigs,pageLigneCfgs:data.pageLigneCfgs,pageCount:data.pages.length};
+  let batch=fbDb.batch();
+  batch.set(projRef,meta);
+  let ops=0;
+  const flushPromises=[];
+  data.pages.forEach((pg,pi)=>{
+    const isLignes=Array.isArray(pg)&&pg.length&&Array.isArray(pg[0]);
+    const cellsRef=projRef.collection('cells');
+    if(isLignes){
+      pg.forEach((line,idx1)=>{
+        line.forEach((c,idx2)=>{
+          const docId=cellDocId(pi,idx1,idx2);
+          if(c.src){batch.set(cellsRef.doc(docId),c);}else{batch.delete(cellsRef.doc(docId));}
+          ops++;
+          if(ops>=450){flushPromises.push(batch.commit().catch(()=>{}));batch=fbDb.batch();ops=0;}
+        });
+      });
+    } else {
+      pg.forEach((c,idx1)=>{
+        const docId=cellDocId(pi,idx1,null);
+        if(c.src){batch.set(cellsRef.doc(docId),c);}else{batch.delete(cellsRef.doc(docId));}
+        ops++;
+        if(ops>=450){flushPromises.push(batch.commit().catch(()=>{}));batch=fbDb.batch();ops=0;}
+      });
+    }
   });
+  flushPromises.push(batch.commit());
+  Promise.all(flushPromises).then(()=>{if(onDone)onDone(true);}).catch(()=>{if(onDone)onDone(false);});
 }
 function cloudDeleteProject(id){
   if(!fbUser||!fbDb)return;
   if(!id.startsWith('cl_'+fbUser.uid+'_'))return;
   const cloudId=id.slice(('cl_'+fbUser.uid+'_').length);
-  fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(cloudId).delete().catch(()=>{});
+  const projRef=fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(cloudId);
+  projRef.collection('cells').get().then(snap=>{
+    const batch=fbDb.batch();
+    snap.forEach(doc=>batch.delete(doc.ref));
+    batch.delete(projRef);
+    return batch.commit();
+  }).catch(()=>{});
+}
+// Récupère un projet du cloud EN ENTIER (mise en page + toutes les photos) — utilisé à l'ouverture,
+// pour être sûr de voir les derniers changements faits depuis un autre téléphone (y compris suppressions).
+function fetchCloudProjectFull(cloudId){
+  if(!fbUser||!fbDb)return Promise.reject('no-user');
+  const projRef=fbDb.collection('users').doc(fbUser.uid).collection('projects').doc(cloudId);
+  return projRef.get().then(metaDoc=>{
+    if(!metaDoc.exists)return null;
+    const meta=metaDoc.data();
+    return projRef.collection('cells').get().then(snap=>{
+      const pages=(meta.pageMode||[]).map((mode,pi)=>{
+        if(mode==='lignes'){
+          const lcs=(meta.pageLigneCfgs&&meta.pageLigneCfgs[pi])||[];
+          return lcs.map(l=>Array.from({length:l.cols},()=>newCell(0)));
+        } else {
+          const pc=(meta.pageConfigs&&meta.pageConfigs[pi])||{cols:1,rows:1,radius:0};
+          return Array.from({length:pc.cols*pc.rows},()=>newCell(pc.radius||0));
+        }
+      });
+      snap.forEach(doc=>{
+        const parts=doc.id.split('_');
+        const pi=parseInt(parts[0]),idx1=parseInt(parts[1]),idx2raw=parts[2];
+        const cellData=doc.data();
+        if(!pages[pi])return;
+        if(idx2raw==='x'){ if(pages[pi][idx1])pages[pi][idx1]=Object.assign({},pages[pi][idx1],cellData); }
+        else{ const idx2=parseInt(idx2raw); if(pages[pi][idx1]&&pages[pi][idx1][idx2])pages[pi][idx1][idx2]=Object.assign({},pages[pi][idx1][idx2],cellData); }
+      });
+      return {name:meta.name,updatedAt:meta.updatedAt,data:{cfg:meta.cfg,pageMode:meta.pageMode,pageConfigs:meta.pageConfigs,pageLigneCfgs:meta.pageLigneCfgs,pages}};
+    });
+  });
+}
+// Sauvegarde manuelle (bouton "💾 Sauvegarder") — immédiate, avec confirmation visible
+function manualSave(){
+  clearTimeout(_autosaveTimer);
+  toast('Sauvegarde en cours…');
+  let id=getActiveProjectId();
+  const projects=getProjects();
+  if(!id||!projects[id]){toast('Rien à sauvegarder.');return;}
+  try{
+    projects[id].data=serializeState();
+    projects[id].updatedAt=Date.now();
+    localStorage.setItem('pg_projects',JSON.stringify(projects));
+  }catch(e){
+    try{projects[id].data=serializeStructureOnly();projects[id].updatedAt=Date.now();localStorage.setItem('pg_projects',JSON.stringify(projects));}catch(e2){}
+  }
+  if(fbUser&&id.startsWith('cl_'+fbUser.uid+'_')){
+    cloudSaveProject(id,projects[id],(ok)=>{
+      toast(ok?'✅ Projet sauvegardé en ligne.':'⚠️ Sauvegarde en ligne incomplète (connexion ou photos trop lourdes).');
+    });
+  } else {
+    toast('✅ Sauvegardé sur ce téléphone.');
+  }
 }
 renderPriceLabels();
 renderAddLigneCustomButtons();
@@ -3634,6 +3766,20 @@ if('serviceWorker' in navigator){
     navigator.serviceWorker.register('sw.js').catch(()=>{});
   });
 }
+
+// ===== CHOIX DE DÉPART : hors-ligne ou en ligne (demandé une seule fois) =====
+function chooseMode(mode){
+  try{localStorage.setItem('pg_mode',mode);}catch(e){}
+  document.getElementById('modal-mode-choice').style.display='none';
+  if(mode==='online')openAccountModal();
+}
+(function(){
+  let hasChoice=false;
+  try{hasChoice=!!localStorage.getItem('pg_mode');}catch(e){hasChoice=true;}
+  if(!hasChoice){
+    document.getElementById('modal-mode-choice').style.display='flex';
+  }
+})();
 </script>
 </body>
 </html>
