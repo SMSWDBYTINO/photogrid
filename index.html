@@ -182,6 +182,18 @@ body.dark .tb-w{background:rgba(255,255,255,0.15);color:white;border:1px solid r
   background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.9);
   border:1px solid rgba(255,255,255,0.18);
 }
+.tb-save{
+  background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.9);
+  border:1px solid rgba(255,255,255,0.18);
+}
+.tb-desktop{
+  background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.9);
+  border:1px solid rgba(255,255,255,0.18);
+}
+.tb-desktop.on{
+  background:#16997E;color:white;
+  border:1px solid rgba(255,255,255,0.3);
+}
 .tb-acc.on{
   background:#16997E;color:white;
   border:1px solid rgba(255,255,255,0.3);
@@ -427,7 +439,7 @@ body.dark .hint{color:#fcd34d;background:rgba(251,191,36,0.08);}
 body.dark .info-box{color:#34d399;background:rgba(52,211,153,0.07);}
 
 /* ══════════════════════════════════════════ CONTENT ══ */
-.content{padding:14px;}
+.content{padding:14px;overflow-x:auto;}
 .dropz{
   border:2px dashed rgba(79,70,229,0.3);
   border-radius:var(--radius);padding:18px;
@@ -501,6 +513,9 @@ body.mode-zoom .iw:active{cursor:grabbing;}
 
 /* ══════════════════════════════════════════ CELL BAR ══ */
 .cell-wrap{position:relative;flex-shrink:0;}
+/* En mode zoom, la barre d'outils sous chaque cadre prenait la place de la ligne suivante et
+   cachait ses photos. On réserve maintenant l'espace nécessaire pour qu'elle ne déborde plus. */
+body.mode-zoom .cell-wrap{margin-bottom:34px;}
 .cell-bar{
   position:absolute;top:100%;left:0;right:0;
   background:rgba(15,14,26,0.92);
@@ -804,6 +819,8 @@ body.dark .qual-btn.sel{background:#1D9E75;color:white;border-color:#0F6E56;box-
   <button class="tb tb-sel" id="tbtn-sel" onclick="toggleSelectMode()" title="Sélectionner plusieurs cadres">☑ Sélection</button>
   <button class="tb tb-proj" onclick="openProjectsModal()" title="Mes projets">📁 Projets</button>
   <button class="tb tb-view" onclick="toggleViewMode()" title="Mode affichage (lecture seule)">👁 Affichage</button>
+  <button class="tb tb-desktop" id="tbtn-desktop" onclick="toggleDesktopView()" title="Agrandir l'aperçu (vue ordinateur)">🖥️ Grand écran</button>
+  <button class="tb tb-save" onclick="manualSave()" title="Sauvegarder maintenant">💾 Sauvegarde</button>
   <button class="tb tb-acc" id="tbtn-acc" onclick="openAccountModal()" title="Mon compte">👤 Compte</button>
   <button class="tb tb-o" onclick="showExportMenu()">⬇ Exporter</button>
 </div>
@@ -1026,8 +1043,9 @@ body.dark .qual-btn.sel{background:#1D9E75;color:white;border-color:#0F6E56;box-
     <div class="orow"><span class="olb">Couleur</span><input type="color" id="bgc" value="#ffffff" onchange="cfg.bgColor=this.value;render();"></div>
   </div>
   <div class="psect">
-    <div class="ptit">Cadres vides</div>
+    <div class="ptit">Cadres vides / fond derrière une photo dézoomée</div>
     <div class="orow"><span class="olb">Couleur fond</span><input type="color" id="ebc" value="#ebebeb" onchange="cfg.emptyBg=this.value;render();"></div>
+    <button class="osv" onclick="applyStyle()">&#10003; Appliquer cette couleur à tous les cadres</button>
   </div>
   <div class="psect">
     <div class="ptit">Bordure tous cadres</div>
@@ -1037,6 +1055,7 @@ body.dark .qual-btn.sel{background:#1D9E75;color:white;border-color:#0F6E56;box-
       <select id="shd"><option value="none">Aucune</option><option value="soft">Douce</option><option value="hard">Forte</option></select>
     </div>
     <button class="osv" onclick="applyStyle()">&#10003; Appliquer à tous</button>
+    <button class="osv" style="background:var(--ruby);margin-top:6px;" onclick="resetAllColors()">↺ Réinitialiser toutes les couleurs (blanc/gris d'origine)</button>
   </div>
 </div>
 
@@ -1478,6 +1497,13 @@ let replaceTarget=null;
 let history=[];
 let selectMode=false;
 let viewMode=false;
+let desktopView=false;
+function toggleDesktopView(){
+  desktopView=!desktopView;
+  const btn=document.getElementById('tbtn-desktop');
+  if(btn)btn.classList.toggle('on',desktopView);
+  render();
+}
 let selectedCells=[]; // [{pi,idx1,idx2}] idx2 = undefined en mode grille
 
 // Page en cours d'édition dans le panel grille/lignes
@@ -1640,9 +1666,10 @@ function generateGrille(){
   } else {
     // Appliquer à la première page seulement si aucune sélection
     if(pages.length===1){
+      const oldPhotos=flattenPagePhotos(0);
       pageMode[0]='grille';
       pageConfigs[0]=Object.assign({},g);
-      pages[0]=Array.from({length:g.cols*g.rows},()=>newCell(g.radius));
+      pages[0]=fillWithOldPhotos(Array.from({length:g.cols*g.rows},()=>newCell(g.radius)),oldPhotos);
     }
   }
   _editPageIdx=undefined;
@@ -1667,9 +1694,10 @@ function applyModele(modelIdx){
     if(pages[pi].length>PER)pages[pi]=pages[pi].slice(0,PER);
   } else {
     if(pages.length===1){
+      const oldPhotos=flattenPagePhotos(0);
       pageMode[0]='grille';
       pageConfigs[0]=Object.assign({},g);
-      pages[0]=Array.from({length:g.cols*g.rows},()=>newCell(g.radius));
+      pages[0]=fillWithOldPhotos(Array.from({length:g.cols*g.rows},()=>newCell(g.radius)),oldPhotos);
     }
   }
   _editPageIdx=undefined;
@@ -1784,14 +1812,44 @@ function showAddLigneModalInline(pi,wrap,infoEl){
   window._inlineMode={pi,wrap,infoEl};
 }
 
+// Récupère toutes les photos d'une page (peu importe l'ancienne mise en page), dans l'ordre de lecture
+function flattenPagePhotos(pi){
+  if(pi===undefined||!pages[pi])return [];
+  const pg=pages[pi];
+  const out=[];
+  if(Array.isArray(pg)&&pg.length&&Array.isArray(pg[0])){
+    pg.forEach(line=>line.forEach(c=>{if(c&&c.src)out.push({src:c.src,imgX:c.imgX||0,imgY:c.imgY||0,imgScale:c.imgScale||1,rotation:c.rotation||0});}));
+  } else {
+    pg.forEach(c=>{if(c&&c.src)out.push({src:c.src,imgX:c.imgX||0,imgY:c.imgY||0,imgScale:c.imgScale||1,rotation:c.rotation||0});});
+  }
+  return out;
+}
+// Remplit une nouvelle structure de page (tableau de cadres, ou tableau de lignes de cadres) avec
+// les anciennes photos dans l'ordre, jusqu'à épuisement — pour ne JAMAIS perdre de photos en changeant
+// le nombre/type de cadres, juste "suivre le rythme" du nouveau nombre de cadres.
+function fillWithOldPhotos(newPg,oldPhotos){
+  let k=0;
+  const isLignes=Array.isArray(newPg)&&newPg.length&&Array.isArray(newPg[0]);
+  if(isLignes){
+    newPg.forEach(line=>line.forEach(c=>{
+      if(k<oldPhotos.length){const p=oldPhotos[k++];c.src=p.src;c.imgX=p.imgX;c.imgY=p.imgY;c.imgScale=p.imgScale;c.rotation=p.rotation;}
+    }));
+  } else {
+    newPg.forEach(c=>{
+      if(k<oldPhotos.length){const p=oldPhotos[k++];c.src=p.src;c.imgX=p.imgX;c.imgY=p.imgY;c.imgScale=p.imgScale;c.rotation=p.rotation;}
+    });
+  }
+  return newPg;
+}
 function generateLignesInline(pi,infoEl){
   const lcs=pageLigneCfgs[pi];if(!lcs)return;
   const totalH=lcs.length===0?0:lcs.reduce((s,l,i)=>s+l.heightMm+(i===0?(l.mt!==undefined?l.mt:3.5):0)+(i===lcs.length-1?(l.mb!==undefined?l.mb:9):0)+(i<lcs.length-1?(l.grow!==undefined?l.grow:12.5):0),0);
   if(totalH>cfg.pageH){if(infoEl)infoEl.innerHTML='<span style="color:var(--red)">⚠️ Hauteur '+totalH.toFixed(0)+'mm > A4.</span>';return;}
   if(infoEl)infoEl.innerHTML='<span style="color:var(--green)">✓ OK — '+lcs.length+' lignes — '+lcs.reduce((s,l)=>s+l.cols,0)+' cadres</span>';
   saveHistory();
+  const oldPhotos=flattenPagePhotos(pi);
   pageMode[pi]='lignes';
-  pages[pi]=lcs.map(l=>Array.from({length:l.cols},()=>newCell(0)));
+  pages[pi]=fillWithOldPhotos(lcs.map(l=>Array.from({length:l.cols},()=>newCell(0))),oldPhotos);
   _editPageIdx=undefined;render();
 }
 
@@ -1903,11 +1961,13 @@ function generateLignes(){
   if(info){info.style.color='var(--green)';info.textContent='OK — '+lcs.length+' lignes — '+lcs.reduce((s,l)=>s+l.cols,0)+' cadres';}
   saveHistory();
   if(pi!==null&&pi<pages.length){
+    const oldPhotos=flattenPagePhotos(pi);
     pageMode[pi]='lignes';
-    pages[pi]=lcs.map(l=>Array.from({length:l.cols},()=>newCell(parseInt(document.getElementById('gar').value)||0)));
+    pages[pi]=fillWithOldPhotos(lcs.map(l=>Array.from({length:l.cols},()=>newCell(parseInt(document.getElementById('gar').value)||0))),oldPhotos);
   } else {
+    const oldPhotos=flattenPagePhotos(0);
     pageMode[0]='lignes';
-    pages[0]=lcs.map(l=>Array.from({length:l.cols},()=>newCell(parseInt(document.getElementById('gar').value)||0)));
+    pages[0]=fillWithOldPhotos(lcs.map(l=>Array.from({length:l.cols},()=>newCell(parseInt(document.getElementById('gar').value)||0))),oldPhotos);
   }
   _editPageIdx=undefined;
   updateLignesPageInfo();
@@ -1918,7 +1978,22 @@ function generateLignes(){
 function newCell(radius){return{src:null,imgX:0,imgY:0,imgScale:1,rotation:0,radius:radius||0,borderColor:cfg.borderColor,borderSize:cfg.borderSize,bg:cfg.emptyBg};}
 
 function applyRadius(){saveHistory();const r=parseInt(document.getElementById('gar').value)||0;pages.forEach((pg,pi)=>{if(pageMode[pi]==='lignes'){pg.forEach(l=>l.forEach(c=>{c.radius=r;}));}else{pg.forEach(c=>{c.radius=r;});}});render();}
-function applyStyle(){saveHistory();cfg.borderColor=document.getElementById('brc').value;cfg.borderSize=parseInt(document.getElementById('brs').value)||0;cfg.shadow=document.getElementById('shd').value;pages.forEach((pg,pi)=>{if(pageMode[pi]==='lignes'){pg.forEach(l=>l.forEach(c=>{c.borderColor=cfg.borderColor;c.borderSize=cfg.borderSize;}));}else{pg.forEach(c=>{c.borderColor=cfg.borderColor;c.borderSize=cfg.borderSize;});}});render();}
+function resetAllColors(){
+  saveHistory();
+  cfg.bgColor='#ffffff';cfg.emptyBg='#ebebeb';cfg.borderColor='#ffffff';cfg.borderSize=0;cfg.shadow='none';
+  document.getElementById('bgc').value='#ffffff';
+  document.getElementById('ebc').value='#ebebeb';
+  document.getElementById('brc').value='#ffffff';
+  document.getElementById('brs').value=0;
+  document.getElementById('shd').value='none';
+  pages.forEach((pg,pi)=>{
+    if(pageMode[pi]==='lignes'){pg.forEach(l=>l.forEach(c=>{c.borderColor='#ffffff';c.borderSize=0;c.bg='#ebebeb';}));}
+    else{pg.forEach(c=>{c.borderColor='#ffffff';c.borderSize=0;c.bg='#ebebeb';});}
+  });
+  render();
+  toast('Couleurs réinitialisées (fond blanc, cadres vides gris clair, sans bordure).');
+}
+function applyStyle(){saveHistory();cfg.borderColor=document.getElementById('brc').value;cfg.borderSize=parseInt(document.getElementById('brs').value)||0;cfg.shadow=document.getElementById('shd').value;cfg.emptyBg=document.getElementById('ebc').value;pages.forEach((pg,pi)=>{if(pageMode[pi]==='lignes'){pg.forEach(l=>l.forEach(c=>{c.borderColor=cfg.borderColor;c.borderSize=cfg.borderSize;c.bg=cfg.emptyBg;}));}else{pg.forEach(c=>{c.borderColor=cfg.borderColor;c.borderSize=cfg.borderSize;c.bg=cfg.emptyBg;});}});render();}
 function onFmtChg(){document.getElementById('cfmt').style.display=document.getElementById('fmts').value==='custom'?'block':'none';}
 const FMT={a4p:{w:210,h:297},a4l:{w:297,h:210},a5p:{w:148,h:210},'10x15':{w:100,h:150}};
 function saveFmt(){const v=document.getElementById('fmts').value;if(v==='custom'){cfg.pageW=+document.getElementById('cpw').value||210;cfg.pageH=+document.getElementById('cph').value||297;}else{cfg.pageW=FMT[v].w;cfg.pageH=FMT[v].h;}cfg.quality=+document.getElementById('qs').value;render();}
@@ -1947,7 +2022,7 @@ function applyPopup(){
 let sc=1;
 function render(){
   const cont=document.getElementById('pc');cont.innerHTML='';
-  const maxW=Math.min(window.innerWidth-24,460);
+  const maxW=desktopView?Math.min(window.innerWidth-24,900):Math.min(window.innerWidth-24,460);
   sc=maxW/cfg.pageW;
   const dW=cfg.pageW*sc,dH=cfg.pageH*sc;
   pages.forEach((pg,pi)=>{
@@ -2429,7 +2504,7 @@ function renderLignesPageEl(cont,sc,dW,dH,pg,pi){
 function makeCell(c,pi,idx1,idx2,cellW,cellH,showBadge){
   const cell=document.createElement('div');
   cell.className='cell'+(showBadge?' show-badge':'');
-  cell.style.cssText='border-radius:'+(c.radius||0)+'px;border:'+(c.borderSize||0)+'px solid '+(c.borderColor||'#fff')+';background:'+(c.src?'#ccc':c.bg||cfg.emptyBg)+';box-shadow:'+getShadow(cfg.shadow)+';overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center;';
+  cell.style.cssText='border-radius:'+(c.radius||0)+'px;border:'+(c.borderSize||0)+'px solid '+(c.borderColor||'#fff')+';background:'+(c.bg||cfg.emptyBg)+';box-shadow:'+getShadow(cfg.shadow)+';overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center;';
 
   const bdg=document.createElement('div');bdg.className='cbdg';
   bdg.textContent=(cellW/sc/10).toFixed(1)+'x'+(cellH/sc/10).toFixed(1)+'cm';
@@ -2492,13 +2567,11 @@ function makeCell(c,pi,idx1,idx2,cellW,cellH,showBadge){
     const bar=document.createElement('div');bar.className='cell-bar';
     const mv=document.createElement('button');mv.className='cbt';mv.style.background='rgba(243,156,18,0.9)';mv.style.color='white';mv.textContent='🖐';mv.title='Glisser cette photo';
     mv.onclick=ev=>{ev.stopPropagation();dragActive=!dragActive;iw.style.cursor=dragActive?'grab':'default';mv.style.background=dragActive?'rgba(29,158,117,0.9)':'rgba(243,156,18,0.9)';mv.textContent=dragActive?'✋':'🖐';};
-    const zi=document.createElement('button');zi.className='cbt cbt-zi';zi.textContent='+';zi.title='Zoom +';zi.onclick=ev=>{ev.stopPropagation();saveHistory();c.imgScale=Math.min(c.imgScale+0.25,6);applyT();};
-    const zo=document.createElement('button');zo.className='cbt cbt-zo';zo.textContent='-';zo.title='Zoom -';zo.onclick=ev=>{ev.stopPropagation();saveHistory();c.imgScale=Math.max(c.imgScale-0.25,0.1);applyT();};
+    const zi=document.createElement('button');zi.className='cbt cbt-zi';zi.textContent='+';zi.title='Zoom +';zi.onclick=ev=>{ev.stopPropagation();saveHistory();c.imgScale=Math.min(c.imgScale+0.25,6);dragActive=false;iw.style.cursor='default';mv.style.background='rgba(243,156,18,0.9)';mv.textContent='🖐';applyT();};
+    const zo=document.createElement('button');zo.className='cbt cbt-zo';zo.textContent='-';zo.title='Zoom -';zo.onclick=ev=>{ev.stopPropagation();saveHistory();c.imgScale=Math.max(c.imgScale-0.25,0.1);dragActive=false;iw.style.cursor='default';mv.style.background='rgba(243,156,18,0.9)';mv.textContent='🖐';applyT();};
     const zr=document.createElement('button');zr.className='cbt cbt-zr';zr.textContent='↺';zr.title='Reset';zr.onclick=ev=>{ev.stopPropagation();saveHistory();c.imgX=0;c.imgY=0;c.imgScale=1;c.rotation=0;dragActive=false;iw.style.cursor='default';mv.style.background='rgba(243,156,18,0.9)';mv.textContent='🖐';applyT();};
-    const rot=document.createElement('button');rot.className='cbt cbt-rot';rot.textContent='⟳';rot.title='Pivoter 90°';rot.onclick=ev=>{ev.stopPropagation();saveHistory();c.rotation=(c.rotation+90)%360;c.imgX=0;c.imgY=0;applyT();};
-    const rep=document.createElement('button');rep.className='cbt cbt-rep';rep.textContent='↔';rep.title='Remplacer';rep.onclick=ev=>{ev.stopPropagation();replaceTarget={pi,idx1,idx2};document.getElementById('fi-replace').click();};
-    const del=document.createElement('button');del.className='cbt cbt-del';del.textContent='×';del.title='Supprimer';del.onclick=ev=>{ev.stopPropagation();saveHistory();c.src=null;c.imgX=0;c.imgY=0;c.imgScale=1;c.rotation=0;render();};
-    bar.appendChild(mv);bar.appendChild(zi);bar.appendChild(zo);bar.appendChild(zr);bar.appendChild(rot);bar.appendChild(rep);bar.appendChild(del);
+    const rot=document.createElement('button');rot.className='cbt cbt-rot';rot.textContent='⟳';rot.title='Pivoter 90°';rot.onclick=ev=>{ev.stopPropagation();saveHistory();c.rotation=(c.rotation+90)%360;c.imgX=0;c.imgY=0;dragActive=false;iw.style.cursor='default';mv.style.background='rgba(243,156,18,0.9)';mv.textContent='🖐';applyT();};
+    bar.appendChild(mv);bar.appendChild(zi);bar.appendChild(zo);bar.appendChild(zr);bar.appendChild(rot);
     cell._zoomBar=bar;
   } else {
     const plus=document.createElement('div');plus.className='plus-btn';
@@ -2512,10 +2585,11 @@ function makeCell(c,pi,idx1,idx2,cellW,cellH,showBadge){
   cell.addEventListener('touchend',ev=>{if(selectMode||viewMode)return;const n=Date.now();if(n-lt<350){openPopup(pi,idx1,idx2,ev.changedTouches[0]);}lt=n;});
 
   if(selectMode){
-    const on=isCellSelected(pi,idx1,idx2);
+    const selIdx=selectedCells.findIndex(s=>cellKey(s.pi,s.idx1,s.idx2)===cellKey(pi,idx1,idx2));
+    const on=selIdx>=0;
     const ov=document.createElement('div');
     ov.className='sel-overlay'+(on?' sel-on':'');
-    const chk=document.createElement('div');chk.className='sel-check';chk.textContent=on?'✓':'';
+    const chk=document.createElement('div');chk.className='sel-check';chk.textContent=on?String(selIdx+1):'';
     ov.appendChild(chk);
     ov.onclick=ev=>{ev.stopPropagation();ev.preventDefault();toggleCellSelection(pi,idx1,idx2);render();};
     cell.appendChild(ov);
@@ -2826,12 +2900,8 @@ function startBulkReplace(){
 function handleBulkReplace(files){
   if(!files.length||!selectedCells.length){document.getElementById('fi-bulk').value='';return;}
   saveHistory();
-  // On garde l'ordre d'apparition (page, puis position) pour remplir les cadres sélectionnés dans l'ordre logique
-  const ordered=selectedCells.slice().sort((a,b)=>{
-    if(a.pi!==b.pi)return a.pi-b.pi;
-    if(a.idx1!==b.idx1)return a.idx1-b.idx1;
-    return (a.idx2||0)-(b.idx2||0);
-  });
+  // On garde l'ordre dans lequel VOUS avez sélectionné les cadres (1er cadre cliqué = 1ère photo choisie)
+  const ordered=selectedCells.slice();
   const n=Math.min(files.length,ordered.length);
   let loaded=0;
   for(let i=0;i<n;i++){
@@ -3274,6 +3344,10 @@ function renderC(c,pw,ph,radius,jpegQ){
     const ctx=cv.getContext('2d');const img=new Image();
     img.onload=()=>{
       ctx.clearRect(0,0,pw,ph);
+      // IMPORTANT : le JPEG ne supporte pas la transparence. Si la photo dézoomée laisse un espace vide
+      // autour, ce vide devenait NOIR automatiquement à l'export. On le remplit avec la couleur choisie.
+      ctx.fillStyle=c.bg||cfg.emptyBg||'#ebebeb';
+      ctx.fillRect(0,0,pw,ph);
       if(radius>0){ctx.beginPath();ctx.moveTo(radius,0);ctx.lineTo(pw-radius,0);ctx.quadraticCurveTo(pw,0,pw,radius);ctx.lineTo(pw,ph-radius);ctx.quadraticCurveTo(pw,ph,pw-radius,ph);ctx.lineTo(radius,ph);ctx.quadraticCurveTo(0,ph,0,ph-radius);ctx.lineTo(0,radius);ctx.quadraticCurveTo(0,0,radius,0);ctx.closePath();ctx.clip();}
       const rot=(c.rotation||0)*Math.PI/180;const isR90=(c.rotation===90||c.rotation===270);
       let coverScale;
@@ -3356,6 +3430,13 @@ function autosaveActiveProject(){
     if(!id||!projects[id]){
       id='pj_'+Date.now();
       projects[id]={name:'Projet 1',data:null,updatedAt:Date.now()};
+      setActiveProjectId(id);
+    }
+    if(fbUser&&!id.startsWith('cl_'+fbUser.uid+'_')){
+      const newId='cl_'+fbUser.uid+'_'+Date.now();
+      projects[newId]=projects[id];
+      delete projects[id];
+      id=newId;
       setActiveProjectId(id);
     }
     // 1) on essaie d'abord de TOUT sauvegarder (cadres + photos)
@@ -3618,6 +3699,9 @@ if(fbAuth){
       }
       setActiveProjectId(gid);
       loadState(projects[gid].data);
+      document.getElementById('modal-account').style.display='none';
+      document.getElementById('modal-projects').style.display='none';
+      document.getElementById('modal-mode-choice').style.display='flex';
     }
   });
 }
@@ -3724,6 +3808,15 @@ function manualSave(){
   let id=getActiveProjectId();
   const projects=getProjects();
   if(!id||!projects[id]){toast('Rien à sauvegarder.');return;}
+  // Si on est connecté mais que le projet actif n'est pas (encore) un projet de compte, on le bascule
+  // automatiquement en projet de compte au lieu de juste le garder en local — pour éviter la confusion.
+  if(fbUser&&!id.startsWith('cl_'+fbUser.uid+'_')){
+    const newId='cl_'+fbUser.uid+'_'+Date.now();
+    projects[newId]=projects[id];
+    delete projects[id];
+    id=newId;
+    setActiveProjectId(id);
+  }
   try{
     projects[id].data=serializeState();
     projects[id].updatedAt=Date.now();
@@ -3733,10 +3826,12 @@ function manualSave(){
   }
   if(fbUser&&id.startsWith('cl_'+fbUser.uid+'_')){
     cloudSaveProject(id,projects[id],(ok)=>{
-      toast(ok?'✅ Projet sauvegardé en ligne.':'⚠️ Sauvegarde en ligne incomplète (connexion ou photos trop lourdes).');
+      toast(ok?'✅ Sauvegardé EN LIGNE — visible avec votre compte sur tout autre téléphone.':'⚠️ Sauvegarde en ligne incomplète (vérifiez votre connexion internet).');
     });
+  } else if(fbUser){
+    toast('⚠️ Connecté, mais ce projet n\'a pas pu être lié au compte. Réessayez.');
   } else {
-    toast('✅ Sauvegardé sur ce téléphone.');
+    toast('✅ Sauvegardé sur ce téléphone (vous n\'êtes pas connecté — connectez-vous pour voir ce projet ailleurs).');
   }
 }
 renderPriceLabels();
